@@ -1,0 +1,47 @@
+# DocumentConverter — Python dependencies
+# Install with:  pip install -r requirements.txt
+#
+# SCANNED PDF / OCR SUPPORT (required for PDFs without a text layer):
+#   Step 1 — Install Tesseract (Windows binary):
+#             https://github.com/UB-Mannheim/tesseract/wiki
+#             During install, tick "Add to PATH"
+#   Step 2 — pymupdf is included below (no Poppler needed)
+#
+# LEGACY EXCEL (.xls) SUPPORT:
+#   xlrd is included below
+
+# ── Document / Office reading ──────────────────────────────
+python-docx       # read/write .docx (PDF→Word tier 2/3)
+python-pptx       # read .pptx (kept for compatibility)
+openpyxl          # read/write .xlsx (PDF→Excel output)
+xlrd              # read legacy .xls (Excel 97-2003)
+
+# ── PDF parsing ────────────────────────────────────────────
+pymupdf           # PDF rendering, text extraction, OCR page images
+pdfplumber        # PDF table extraction (PDF→Excel)
+pypdf             # F-15: merge per-sheet Excel PDFs during xlsx export
+
+# ── Windows COM automation ─────────────────────────────────
+pywin32           # drives Word/Excel/PowerPoint COM
+
+# ── PDF output (to-PDF converters) ────────────────────────
+reportlab         # .txt .md .csv .xls → PDF (pure Python)
+weasyprint        # HTML → PDF fallback
+
+# ── Image / OCR ───────────────────────────────────────────
+Pillow            # image handling for Chrome screenshot and OCR
+pytesseract       # OCR engine wrapper (requires Tesseract binary — see above)
+numpy             # F-14: row analysis in Chrome screenshot crop (convert_html)
+
+# ── Process management ─────────────────────────────────────
+psutil            # F-02: safe per-PID Office process termination
+
+# ── Drag-and-drop GUI ──────────────────────────────────────
+tkinterdnd2       # F-19: TkinterDnD drag-and-drop support for all converter windows
+
+# ── Legacy / optional ─────────────────────────────────────
+pdfminer.six      # PDF text extraction (kept for compatibility)
+docx2pdf          # .docx -> PDF alternative (superseded by pywin32 COM)
+markdown          # Markdown parsing (kept for compatibility)
+striprtf          # .rtf support (kept for compatibility)
+odfpy             # .odt support (kept for compatibility)

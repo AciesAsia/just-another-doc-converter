@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# PyInstaller build output
+build/
+dist/
+
+# Installer output
+installer_output/
+
+# App runtime folders
+input/
+output/
+logs/
+
+# Config written by installer (user-specific)
+config.json
+
+# IDE / editor
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.obsidian/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Secrets / credentials
+*.env
+.env*
