@@ -1,0 +1,15 @@
+dist/
+build/
+installer_output/
+__pycache__/
+*.pyc
+.venv/
+_archive/
+input/
+output/
+logs/
+Claude outputs/
+Converted-Markdowns/
+User Manuals/
+.vscode/
+setup_and_push.ps1
