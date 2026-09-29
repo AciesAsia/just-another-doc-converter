@@ -1041,24 +1041,34 @@ def convert_pdf_to_docx(src: Path, dest: Path) -> bool:
             return False
 
         def _is_heading(line: str) -> bool:
-            """Heuristic: short, no sentence-ending punctuation, not all lower."""
+            """Heuristic: ALL-CAPS multi-word line, no trailing punctuation."""
             s = line.strip()
             if not s or len(s) > 80:
                 return False
             if s[-1] in ".,:;?!)":
                 return False
             words = s.split()
-            if len(words) > 10:
+            # Require 2–8 words and ALL CAPS — title-case is too broad for body text
+            if len(words) < 2 or len(words) > 8:
                 return False
-            # All-caps or title-case lines with 2+ words are likely headings
-            return s.isupper() or (len(words) >= 2 and s.istitle())
+            return s.isupper()
+
+        def _clean_ocr_line(line: str) -> str:
+            """Strip OCR noise: asterisks, pipes and stray punctuation around words."""
+            line = re.sub(r'^\s*[*|_~]+\s*', '', line)
+            line = re.sub(r'\s*[*|_~]+\s*$', '', line)
+            # Strip standalone page-number lines
+            return line.strip()
 
         def _group_paragraphs(raw_text: str) -> list:
             """Merge continuation lines; split on blank lines."""
             paragraphs = []
             current = ""
             for line in raw_text.splitlines():
-                stripped = line.strip()
+                stripped = _clean_ocr_line(line)
+                # Skip bare page numbers
+                if re.match(r'^\d{1,3}$', stripped):
+                    continue
                 if not stripped:
                     if current:
                         paragraphs.append(current.strip())
