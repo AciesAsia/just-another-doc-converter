@@ -1040,6 +1040,37 @@ def convert_pdf_to_docx(src: Path, dest: Path) -> bool:
                 "Download from: https://github.com/UB-Mannheim/tesseract/wiki")
             return False
 
+        def _normalize_unicode(text: str) -> str:
+            """Map Unicode Mathematical Bold/Italic variants back to plain ASCII."""
+            result = []
+            for ch in text:
+                cp = ord(ch)
+                # Mathematical Bold A-Z
+                if 0x1D400 <= cp <= 0x1D419:
+                    result.append(chr(cp - 0x1D400 + ord('A')))
+                # Mathematical Bold a-z
+                elif 0x1D41A <= cp <= 0x1D433:
+                    result.append(chr(cp - 0x1D41A + ord('a')))
+                # Mathematical Bold digits 0-9
+                elif 0x1D7CE <= cp <= 0x1D7D7:
+                    result.append(chr(cp - 0x1D7CE + ord('0')))
+                # Mathematical Italic A-Z
+                elif 0x1D434 <= cp <= 0x1D44D:
+                    result.append(chr(cp - 0x1D434 + ord('A')))
+                # Mathematical Italic a-z (h is at U+210E, handled by NFKC)
+                elif 0x1D44E <= cp <= 0x1D467:
+                    result.append(chr(cp - 0x1D44E + ord('a')))
+                # Mathematical Bold Italic A-Z
+                elif 0x1D468 <= cp <= 0x1D481:
+                    result.append(chr(cp - 0x1D468 + ord('A')))
+                # Mathematical Bold Italic a-z
+                elif 0x1D482 <= cp <= 0x1D49B:
+                    result.append(chr(cp - 0x1D482 + ord('a')))
+                else:
+                    import unicodedata
+                    result.append(unicodedata.normalize('NFKC', ch))
+            return ''.join(result)
+
         def _is_heading(line: str) -> bool:
             """Heuristic: ALL-CAPS multi-word line, no trailing punctuation."""
             s = line.strip()
@@ -1096,6 +1127,8 @@ def convert_pdf_to_docx(src: Path, dest: Path) -> bool:
             if not raw.strip():
                 continue
 
+            raw = _normalize_unicode(raw)
+
             if page_num > 0:
                 doc.add_page_break()
 
@@ -1103,8 +1136,10 @@ def convert_pdf_to_docx(src: Path, dest: Path) -> bool:
                 if _is_heading(para_text):
                     doc.add_heading(para_text, level=2)
                 else:
-                    p = doc.add_paragraph(para_text)
-                    p.style.font.size = Pt(11)
+                    p = doc.add_paragraph()
+                    run = p.add_run(para_text)
+                    run.bold = False
+                    run.font.size = Pt(11)
                     p.paragraph_format.space_after = Pt(6)
 
         pdf.close()
