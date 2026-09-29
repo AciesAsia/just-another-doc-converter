@@ -994,12 +994,8 @@ def convert_pdf_to_docx(src: Path, dest: Path) -> bool:
         from docx.shared import Pt
 
         def _text_quality_ok(text: str) -> bool:
-            “””Return False if extracted text looks like a low-quality scanner OCR layer.
-
-            Checks the ratio of non-ASCII / visually-suspicious characters.
-            A high ratio means the embedded text layer itself is garbled and we
-            should prefer Tesseract (Tier 3) over using it directly.
-            “””
+            # Return False if extracted text looks like a low-quality scanner OCR layer.
+            # Checks ratio of non-ASCII characters; high ratio means garbled embedded text.
             if not text:
                 return False
             letters = [c for c in text if c.isalpha()]
@@ -1011,13 +1007,13 @@ def convert_pdf_to_docx(src: Path, dest: Path) -> bool:
         pdf = fitz.open(str(src.resolve()))
 
         # Sample first 3 pages to assess embedded text quality before committing
-        sample_text = “”
+        sample_text = ''
         for i in range(min(3, len(pdf))):
-            sample_text += pdf[i].get_text(“text”)
+            sample_text += pdf[i].get_text('text')
 
         if not _text_quality_ok(sample_text):
             pdf.close()
-            raise ValueError(“embedded text layer quality too low — falling through to Tesseract OCR”)
+            raise ValueError('embedded text layer quality too low - falling through to Tesseract OCR')
 
         doc = Document()
         doc.add_heading(src.stem, level=1)
@@ -1026,11 +1022,11 @@ def convert_pdf_to_docx(src: Path, dest: Path) -> bool:
         for page_num in range(len(pdf)):
             page = pdf[page_num]
             # Normalize and clean extracted text the same way Tier 3 does
-            text = _ud.normalize(‘NFKC’, page.get_text(“text”))
-            text = text.replace(‘’’, “’”).replace(‘’’, “’”)
-            text = text.replace(‘”’, ‘”’).replace(‘”’, ‘”’)
-            text = text.replace(‘–‘, ‘-’).replace(‘—‘, ‘-’)
-            text = re.sub(r’\*+’, ‘’, text)
+            text = _ud.normalize('NFKC', page.get_text("text"))
+            text = text.replace(''', "'").replace(''', "'")
+            text = text.replace('"', '"').replace('"', '"')
+            text = text.replace('–', '-').replace('—', '-')
+            text = re.sub(r'\*+', '', text)
             if not text.strip():
                 continue
             if pages_written > 0:
@@ -1047,7 +1043,7 @@ def convert_pdf_to_docx(src: Path, dest: Path) -> bool:
 
         pdf.close()
         if pages_written == 0:
-            raise ValueError(“no text extracted — likely scanned PDF, falling through to OCR”)
+            raise ValueError("no text extracted — likely scanned PDF, falling through to OCR")
 
         # Final pass: strip any bold that slipped through style inheritance
         for para in doc.paragraphs:
@@ -1093,8 +1089,8 @@ def convert_pdf_to_docx(src: Path, dest: Path) -> bool:
             text = unicodedata.normalize('NFKC', text)
             # Normalise smart quotes and dashes to plain ASCII so Word does not
             # apply character-style formatting via its autocorrect engine
-            text = text.replace('‘', "'").replace('’', "'")
-            text = text.replace('“', '"').replace('”', '"')
+            text = text.replace(''', "'").replace(''', "'")
+            text = text.replace('"', '"').replace('"', '"')
             text = text.replace('–', '-').replace('—', '-')
             return text
 
