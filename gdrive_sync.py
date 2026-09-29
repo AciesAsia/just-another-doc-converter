@@ -1,8 +1,8 @@
 """
 gdrive_sync.py
 --------------
-Downloads all PDF files from a Google Drive folder to a local directory,
-then deletes them from Drive on successful download.
+Converts PDF files in a Google Drive folder to .docx (via Google Docs),
+downloads them to a local directory, then deletes all temp files from Drive.
 
 Setup (one-time):
   1. Go to https://console.cloud.google.com/
@@ -15,9 +15,7 @@ Usage:
   python gdrive_sync.py
 """
 
-import os
 import sys
-import json
 from pathlib import Path
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -31,6 +29,9 @@ SCOPES = ["https://www.googleapis.com/auth/drive"]
 SCRIPT_DIR = Path(__file__).parent
 CREDENTIALS_FILE = SCRIPT_DIR / "credentials.json"
 TOKEN_FILE = SCRIPT_DIR / "token.json"
+
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+GDOC_MIME = "application/vnd.google-apps.document"
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -76,12 +77,29 @@ def list_pdfs(service):
     return results.get("files", [])
 
 
-def download_file(service, file_id, file_name, dest_dir):
-    from googleapiclient.http import MediaIoBaseDownload
-    import io
+def convert_to_gdoc(service, pdf_id, name):
+    """Import PDF into Google Docs format (triggers Google's OCR/conversion)."""
+    stem = Path(name).stem
+    body = {
+        "name": stem,
+        "mimeType": GDOC_MIME,
+        "parents": [DRIVE_FOLDER_ID],
+    }
+    gdoc = service.files().copy(
+        fileId=pdf_id,
+        body=body,
+        supportsAllDrives=True,
+    ).execute()
+    return gdoc["id"]
 
-    dest_path = dest_dir / file_name
-    request = service.files().get_media(fileId=file_id)
+
+def export_as_docx(service, gdoc_id, stem, dest_dir):
+    """Export a Google Doc as .docx and save locally."""
+    import io
+    from googleapiclient.http import MediaIoBaseDownload
+
+    dest_path = dest_dir / f"{stem}.docx"
+    request = service.files().export_media(fileId=gdoc_id, mimeType=DOCX_MIME)
     with open(dest_path, "wb") as fh:
         downloader = MediaIoBaseDownload(fh, request)
         done = False
@@ -96,10 +114,9 @@ def delete_file(service, file_id):
 
 def run():
     print("=" * 55)
-    print("  Google Drive PDF Sync")
+    print("  Google Drive PDF → Word Sync")
     print("=" * 55)
 
-    # Ensure local destination exists
     LOCAL_DEST.mkdir(parents=True, exist_ok=True)
 
     service = get_drive_service()
@@ -110,32 +127,49 @@ def run():
         print("=" * 55)
         return
 
-    print(f"Found {len(files)} PDF(s) to download.\n")
+    print(f"Found {len(files)} PDF(s) to convert.\n")
 
-    downloaded = 0
+    converted = 0
     failed = 0
 
     for f in files:
         name = f["name"]
-        fid = f["id"]
+        pdf_id = f["id"]
+        stem = Path(name).stem
         size_kb = int(f.get("size", 0)) // 1024
-        print(f"  Downloading: {name} ({size_kb} KB) ... ", end="", flush=True)
+        print(f"  Converting: {name} ({size_kb} KB) ... ", end="", flush=True)
+
+        gdoc_id = None
         try:
-            dest = download_file(service, fid, name, LOCAL_DEST)
-            # Verify file landed on disk
+            # Step 1: import PDF as Google Doc
+            gdoc_id = convert_to_gdoc(service, pdf_id, name)
+
+            # Step 2: export Google Doc as .docx
+            dest = export_as_docx(service, gdoc_id, stem, LOCAL_DEST)
+
             if dest.exists() and dest.stat().st_size > 0:
-                delete_file(service, fid)
-                print("OK (deleted from Drive)")
-                downloaded += 1
+                # Step 3: clean up Drive — delete both the temp Google Doc and original PDF
+                delete_file(service, gdoc_id)
+                delete_file(service, pdf_id)
+                print("OK → .docx saved, Drive cleaned")
+                converted += 1
             else:
-                print("FAILED (empty file, kept on Drive)")
+                print("FAILED (empty output)")
+                if gdoc_id:
+                    delete_file(service, gdoc_id)
                 failed += 1
+
         except Exception as e:
             print(f"FAILED ({e})")
+            if gdoc_id:
+                try:
+                    delete_file(service, gdoc_id)
+                except Exception:
+                    pass
             failed += 1
 
     print()
-    print(f"  Downloaded : {downloaded}")
+    print(f"  Converted  : {converted}")
     print(f"  Failed     : {failed}")
     print(f"  Saved to   : {LOCAL_DEST}")
     print("=" * 55)
