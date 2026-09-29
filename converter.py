@@ -1476,8 +1476,14 @@ def close_office_apps():
 
 
 def cleanup_output():
-    """Remove any non-PDF files (Office temp files) from the output folder."""
+    """Remove Office temp/lock files from the output folder.
+
+    Keeps all valid conversion outputs: .pdf, .docx, .xlsx.
+    Only removes Office lock files (~$...) and other temp artefacts.
+    """
     import time
+    # Valid output extensions — never delete these
+    KEEP_EXTS = {".pdf", ".docx", ".xlsx"}
     # Kill print spooler helper that holds .tmp locks (safe to kill — restarts automatically)
     subprocess.run(["taskkill", "/F", "/IM", "splwow64.exe"], capture_output=True)
     # Retry up to 10 times with 2s sleep — spooler may hold locks for several seconds
@@ -1486,7 +1492,7 @@ def cleanup_output():
         remaining = []
         removed = []
         for f in OUTPUT_DIR.iterdir():
-            if f.is_file() and f.suffix.lower() != ".pdf":
+            if f.is_file() and f.suffix.lower() not in KEEP_EXTS:
                 try:
                     f.unlink()
                     removed.append(f.name)
