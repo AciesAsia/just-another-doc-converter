@@ -988,33 +988,42 @@ def convert_pdf_to_docx(src: Path, dest: Path) -> bool:
 
     # ── Tier 2: pymupdf + python-docx ────────────────────────────────────────
     try:
-        import pymupdf as fitz  # pymupdf
+        import pymupdf as fitz
+        import unicodedata as _ud
         from docx import Document
         from docx.shared import Pt
 
         pdf = fitz.open(str(src.resolve()))
         doc = Document()
 
-        # Document title from filename
         doc.add_heading(src.stem, level=1)
 
+        pages_written = 0
         for page_num in range(len(pdf)):
             page = pdf[page_num]
-            text = page.get_text("text")
+            # Normalize and clean extracted text the same way Tier 3 does
+            text = _ud.normalize('NFKC', page.get_text("text"))
+            text = text.replace('‘', "'").replace('’', "'")
+            text = text.replace('“', '"').replace('”', '"')
+            text = text.replace('–', '-').replace('—', '-')
+            text = re.sub(r'\*+', '', text)
             if not text.strip():
                 continue
-            # Add a page-break heading for multi-page docs
-            if page_num > 0:
+            if pages_written > 0:
                 doc.add_page_break()
-                doc.add_heading(f"Page {page_num + 1}", level=2)
+            pages_written += 1
             for line in text.splitlines():
                 line = line.strip()
                 if not line:
                     continue
-                para = doc.add_paragraph(line)
-                para.style.font.size = Pt(11)
+                p = doc.add_paragraph()
+                run = p.add_run(line)
+                run.bold = False
+                run.font.size = Pt(11)
 
         pdf.close()
+        if pages_written == 0:
+            raise ValueError("no text extracted — likely scanned PDF, falling through to OCR")
         doc.save(str(dest.resolve()))
         log(f"  [OK-pymupdf] {dest.name}")
         return True
