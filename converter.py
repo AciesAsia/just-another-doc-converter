@@ -1041,35 +1041,22 @@ def convert_pdf_to_docx(src: Path, dest: Path) -> bool:
             return False
 
         def _normalize_unicode(text: str) -> str:
-            """Map Unicode Mathematical Bold/Italic variants back to plain ASCII."""
-            result = []
-            for ch in text:
-                cp = ord(ch)
-                # Mathematical Bold A-Z
-                if 0x1D400 <= cp <= 0x1D419:
-                    result.append(chr(cp - 0x1D400 + ord('A')))
-                # Mathematical Bold a-z
-                elif 0x1D41A <= cp <= 0x1D433:
-                    result.append(chr(cp - 0x1D41A + ord('a')))
-                # Mathematical Bold digits 0-9
-                elif 0x1D7CE <= cp <= 0x1D7D7:
-                    result.append(chr(cp - 0x1D7CE + ord('0')))
-                # Mathematical Italic A-Z
-                elif 0x1D434 <= cp <= 0x1D44D:
-                    result.append(chr(cp - 0x1D434 + ord('A')))
-                # Mathematical Italic a-z (h is at U+210E, handled by NFKC)
-                elif 0x1D44E <= cp <= 0x1D467:
-                    result.append(chr(cp - 0x1D44E + ord('a')))
-                # Mathematical Bold Italic A-Z
-                elif 0x1D468 <= cp <= 0x1D481:
-                    result.append(chr(cp - 0x1D468 + ord('A')))
-                # Mathematical Bold Italic a-z
-                elif 0x1D482 <= cp <= 0x1D49B:
-                    result.append(chr(cp - 0x1D482 + ord('a')))
-                else:
-                    import unicodedata
-                    result.append(unicodedata.normalize('NFKC', ch))
-            return ''.join(result)
+            """Normalize all Unicode styled variants (bold, italic, etc.) to plain ASCII.
+
+            NFKC handles every Mathematical Alphanumeric Symbol range in one pass,
+            covering Mathematical Bold, Italic, Bold Italic, Sans-Serif Bold, Script,
+            Fraktur, Double-Struck, Monospace and all others (U+1D400-U+1D7FF).
+            """
+            import unicodedata
+            # NFKC compatibility decomposition maps all styled Unicode letters/digits
+            # back to their plain ASCII equivalents
+            text = unicodedata.normalize('NFKC', text)
+            # Normalise smart quotes and dashes to plain ASCII so Word does not
+            # apply character-style formatting via its autocorrect engine
+            text = text.replace('‘', "'").replace('’', "'")
+            text = text.replace('“', '"').replace('”', '"')
+            text = text.replace('–', '-').replace('—', '-')
+            return text
 
         def _is_heading(line: str) -> bool:
             """Heuristic: ALL-CAPS multi-word line, no trailing punctuation."""
