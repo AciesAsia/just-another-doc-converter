@@ -989,14 +989,14 @@ def convert_pdf_to_docx(src: Path, dest: Path) -> bool:
 
     # ── Tier 3: pytesseract OCR (for scanned PDFs) ────────────────────────────
     try:
-        import pymupdf as fitz  # pymupdf — used to render pages as images
+        import pymupdf as fitz
         from PIL import Image as PILImage
         import pytesseract
         from docx import Document
-        from docx.shared import Pt
+        from docx.shared import Pt, RGBColor
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
         import io
 
-        # Check Tesseract is installed
         try:
             pytesseract.get_tesseract_version()
         except Exception:
@@ -1004,32 +1004,62 @@ def convert_pdf_to_docx(src: Path, dest: Path) -> bool:
                 "Download from: https://github.com/UB-Mannheim/tesseract/wiki")
             return False
 
+        def _is_heading(line: str) -> bool:
+            """Heuristic: short, no sentence-ending punctuation, not all lower."""
+            s = line.strip()
+            if not s or len(s) > 80:
+                return False
+            if s[-1] in ".,:;?!)":
+                return False
+            words = s.split()
+            if len(words) > 10:
+                return False
+            # All-caps or title-case lines with 2+ words are likely headings
+            return s.isupper() or (len(words) >= 2 and s.istitle())
+
+        def _group_paragraphs(raw_text: str) -> list:
+            """Merge continuation lines; split on blank lines."""
+            paragraphs = []
+            current = ""
+            for line in raw_text.splitlines():
+                stripped = line.strip()
+                if not stripped:
+                    if current:
+                        paragraphs.append(current.strip())
+                        current = ""
+                else:
+                    current += (" " if current else "") + stripped
+            if current:
+                paragraphs.append(current.strip())
+            return [p for p in paragraphs if len(p) > 1]
+
         pdf = fitz.open(str(src.resolve()))
         doc = Document()
-        doc.add_heading(src.stem, level=1)
+
+        # Title from filename
+        title_para = doc.add_heading(src.stem, level=1)
+        title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
         for page_num in range(len(pdf)):
             page = pdf[page_num]
-            # Render page at 300 DPI for good OCR accuracy
             mat = fitz.Matrix(300 / 72, 300 / 72)
             pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
-            img_bytes = pix.tobytes("png")
-            img = PILImage.open(io.BytesIO(img_bytes))
+            img = PILImage.open(io.BytesIO(pix.tobytes("png")))
 
-            text = pytesseract.image_to_string(img, lang="eng")
-            if not text.strip():
+            raw = pytesseract.image_to_string(img, lang="eng")
+            if not raw.strip():
                 continue
 
             if page_num > 0:
                 doc.add_page_break()
-                doc.add_heading(f"Page {page_num + 1}", level=2)
 
-            for line in text.splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                para = doc.add_paragraph(line)
-                para.style.font.size = Pt(11)
+            for para_text in _group_paragraphs(raw):
+                if _is_heading(para_text):
+                    doc.add_heading(para_text, level=2)
+                else:
+                    p = doc.add_paragraph(para_text)
+                    p.style.font.size = Pt(11)
+                    p.paragraph_format.space_after = Pt(6)
 
         pdf.close()
         doc.save(str(dest.resolve()))
@@ -1200,7 +1230,131 @@ def convert_pdf_to_xlsx(src: Path, dest: Path) -> bool:
         log(f"  [ERROR] Missing library: {e}")
         return False
     except Exception as e:
-        log(f"  [FAIL] {src.name} — {e}")
+        log(f"  [WARN] pdfplumber extraction failed ({e}) — trying OCR")
+
+    # ── Tier 2: OCR fallback for scanned/image-only PDFs ─────────────────────
+    try:
+        import pymupdf as fitz
+        from PIL import Image as PILImage
+        import pytesseract
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+        from collections import defaultdict
+        import io
+
+        try:
+            pytesseract.get_tesseract_version()
+        except Exception:
+            log("  [ERROR] Tesseract OCR not installed. "
+                "Download from: https://github.com/UB-Mannheim/tesseract/wiki")
+            return False
+
+        HEADER_FILL  = PatternFill("solid", fgColor="2C3E50")
+        HEADER_FONT  = Font(color="FFFFFF", bold=True, size=10)
+        ROW_FILL_ALT = PatternFill("solid", fgColor="F2F2F2")
+        CELL_FONT    = Font(size=10)
+        THIN = Border(
+            left=Side(style="thin", color="CCCCCC"),
+            right=Side(style="thin", color="CCCCCC"),
+            top=Side(style="thin", color="CCCCCC"),
+            bottom=Side(style="thin", color="CCCCCC"),
+        )
+        WRAP = Alignment(wrap_text=True, vertical="top")
+
+        pdf = fitz.open(str(src.resolve()))
+        all_word_rows = []   # list of lists of (x_centre, text) tuples
+
+        for page_num in range(len(pdf)):
+            page = pdf[page_num]
+            mat = fitz.Matrix(300 / 72, 300 / 72)
+            pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
+            img = PILImage.open(io.BytesIO(pix.tobytes("png")))
+
+            # image_to_data returns per-word bounding boxes
+            data = pytesseract.image_to_data(
+                img, lang="eng", output_type=pytesseract.Output.DICT
+            )
+
+            # Group words by line_num + block_num to reconstruct rows
+            row_dict = defaultdict(list)
+            for i, word in enumerate(data["text"]):
+                word = word.strip()
+                if not word or int(data["conf"][i]) < 30:
+                    continue
+                key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
+                x_centre = data["left"][i] + data["width"][i] / 2
+                row_dict[key].append((x_centre, word))
+
+            for key in sorted(row_dict.keys()):
+                words = sorted(row_dict[key], key=lambda w: w[0])
+                if words:
+                    all_word_rows.append(words)
+
+        pdf.close()
+
+        if not all_word_rows:
+            log(f"  [FAIL] {src.name} — OCR produced no text")
+            return False
+
+        # Determine column count from most common row width
+        from collections import Counter
+        col_counts = Counter(len(r) for r in all_word_rows)
+        num_cols = col_counts.most_common(1)[0][0]
+
+        # Build column x-centres from the most representative row
+        ref_row = next(r for r in all_word_rows if len(r) == num_cols)
+        col_centres = [w[0] for w in ref_row]
+
+        def _bucket(x):
+            return min(range(len(col_centres)), key=lambda i: abs(col_centres[i] - x))
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Data"
+
+        # First row = header
+        header_row = all_word_rows[0]
+        header = [""] * num_cols
+        for xc, word in header_row:
+            header[_bucket(xc)] += (" " if header[_bucket(xc)] else "") + word
+
+        for col_idx, hdr in enumerate(header, 1):
+            cell = ws.cell(row=1, column=col_idx, value=hdr.strip())
+            cell.fill = HEADER_FILL
+            cell.font = HEADER_FONT
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.border = THIN
+        ws.freeze_panes = "A2"
+
+        # Data rows
+        xlsx_row = 2
+        for row_words in all_word_rows[1:]:
+            cells = [""] * num_cols
+            for xc, word in row_words:
+                cells[_bucket(xc)] += (" " if cells[_bucket(xc)] else "") + word
+            for col_idx, val in enumerate(cells, 1):
+                cell = ws.cell(row=xlsx_row, column=col_idx, value=val.strip())
+                cell.font = CELL_FONT
+                cell.fill = ROW_FILL_ALT if xlsx_row % 2 == 0 else PatternFill()
+                cell.alignment = WRAP
+                cell.border = THIN
+            xlsx_row += 1
+
+        # Auto-size columns
+        for col in ws.columns:
+            max_len = max((len(str(c.value or "")) for c in col), default=0)
+            ws.column_dimensions[get_column_letter(col[0].column)].width = min(max_len + 4, 40)
+
+        wb.save(str(dest.resolve()))
+        log(f"  [OK-OCR] {dest.name} — {xlsx_row-2} rows, {num_cols} columns")
+        return True
+
+    except ImportError as e:
+        log(f"  [ERROR] Missing library for OCR fallback: {e}")
+        return False
+    except Exception as e:
+        log(f"  [FAIL] {src.name} — all PDF->Excel methods failed: {e}")
         return False
 
 
