@@ -1024,6 +1024,13 @@ def convert_pdf_to_docx(src: Path, dest: Path) -> bool:
         pdf.close()
         if pages_written == 0:
             raise ValueError("no text extracted — likely scanned PDF, falling through to OCR")
+
+        # Final pass: strip any bold that slipped through style inheritance
+        for para in doc.paragraphs:
+            for run in para.runs:
+                if run.bold:
+                    run.bold = False
+
         doc.save(str(dest.resolve()))
         log(f"  [OK-pymupdf] {dest.name}")
         return True
@@ -1106,6 +1113,8 @@ def convert_pdf_to_docx(src: Path, dest: Path) -> bool:
                 paragraphs.append(current.strip())
             return [p for p in paragraphs if len(p) > 1]
 
+        from PIL import ImageFilter, ImageEnhance
+
         pdf = fitz.open(str(src.resolve()))
         doc = Document()
 
@@ -1119,13 +1128,18 @@ def convert_pdf_to_docx(src: Path, dest: Path) -> bool:
             pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
             img = PILImage.open(io.BytesIO(pix.tobytes("png")))
 
-            raw = pytesseract.image_to_string(img, lang="eng")
+            # Preprocess image: grayscale → contrast boost → sharpen
+            # Improves OCR accuracy on old/degraded scans
+            img = img.convert("L")
+            img = ImageEnhance.Contrast(img).enhance(2.0)
+            img = img.filter(ImageFilter.SHARPEN)
+
+            raw = pytesseract.image_to_string(img, lang="eng",
+                                              config="--oem 3 --psm 6")
             if not raw.strip():
                 continue
 
             raw = _normalize_unicode(raw)
-            # Strip asterisks that Tesseract outputs for unclear chars —
-            # Word's AutoFormat turns *word* into bold inline text
             raw = re.sub(r'\*+', '', raw)
 
             if page_num > 0:
@@ -1142,6 +1156,13 @@ def convert_pdf_to_docx(src: Path, dest: Path) -> bool:
                     p.paragraph_format.space_after = Pt(6)
 
         pdf.close()
+
+        # Final pass: strip any bold that slipped through style inheritance
+        for para in doc.paragraphs:
+            for run in para.runs:
+                if run.bold:
+                    run.bold = False
+
         doc.save(str(dest.resolve()))
         log(f"  [OK-OCR] {dest.name}")
         return True
