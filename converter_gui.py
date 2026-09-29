@@ -21,6 +21,12 @@ from tkinter import filedialog, scrolledtext, ttk
 from pathlib import Path
 from datetime import datetime
 
+try:
+    from tkinterdnd2 import TkinterDnD, DND_FILES
+    _DND_AVAILABLE = True
+except ImportError:
+    _DND_AVAILABLE = False
+
 HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
 
@@ -78,7 +84,10 @@ def _load_output_dir() -> Path:
     return desktop
 
 
-class ConverterApp(tk.Tk):
+_AppBase = TkinterDnD.Tk if _DND_AVAILABLE else tk.Tk
+
+
+class ConverterApp(_AppBase):
     def __init__(self):
         super().__init__()
         self.title("Convert to PDF")
@@ -182,6 +191,21 @@ class ConverterApp(tk.Tk):
             highlightthickness=1, highlightbackground=CLR_BORDER,
             activestyle="none")
         self._queue_box.pack(fill="x")
+
+        # drag-and-drop hint overlaid on the listbox
+        self._lbl_dnd_hint = tk.Label(
+            queue_frame,
+            text="Drag & drop files here",
+            bg=CLR_SURFACE2, fg=CLR_BORDER,
+            font=("Segoe UI", 9, "italic"))
+        self._lbl_dnd_hint.place(relx=0.5, rely=0.5, anchor="center")
+        self._queue_box.bind("<<ListboxSelect>>", lambda e: None)
+
+        if _DND_AVAILABLE:
+            self._queue_box.drop_target_register(DND_FILES)
+            self._queue_box.dnd_bind("<<Drop>>",       self._on_drop)
+            self._queue_box.dnd_bind("<<DragEnter>>",  self._on_drag_enter)
+            self._queue_box.dnd_bind("<<DragLeave>>",  self._on_drag_leave)
 
         self._lbl_queue_count = tk.Label(
             queue_frame, text="0 files queued",
@@ -311,6 +335,59 @@ class ConverterApp(tk.Tk):
             text=f"{count} file{'s' if count != 1 else ''} queued")
         self._btn_convert.config(
             state="normal" if count > 0 and not self._running else "disabled")
+        if count == 0:
+            self._lbl_dnd_hint.lift()
+        else:
+            self._lbl_dnd_hint.lower()
+
+    def _on_drag_enter(self, event):
+        self._queue_box.config(highlightbackground=CLR_HEADER, highlightthickness=2)
+
+    def _on_drag_leave(self, event):
+        self._queue_box.config(highlightbackground=CLR_BORDER, highlightthickness=1)
+
+    def _on_drop(self, event):
+        self._queue_box.config(highlightbackground=CLR_BORDER, highlightthickness=1)
+        raw = event.data.strip()
+        paths = []
+        while raw:
+            if raw.startswith("{"):
+                end = raw.index("}")
+                paths.append(raw[1:end])
+                raw = raw[end + 1:].strip()
+            else:
+                parts = raw.split(" ", 1)
+                paths.append(parts[0])
+                raw = parts[1].strip() if len(parts) > 1 else ""
+
+        added = 0
+        skipped = 0
+        for p in paths:
+            path = Path(p)
+            if path.is_dir():
+                for f in sorted(path.iterdir()):
+                    if (f.is_file() and f.suffix.lower() in SUPPORTED_TO_PDF
+                            and f not in self._files
+                            and not f.name.startswith("~$")):
+                        self._files.append(f)
+                        added += 1
+            elif path.is_file():
+                if path.suffix.lower() in SUPPORTED_TO_PDF:
+                    if path not in self._files and not path.name.startswith("~$"):
+                        self._files.append(path)
+                        added += 1
+                    else:
+                        skipped += 1
+                else:
+                    self._log_write(
+                        f"  Skipped (unsupported): {path.name}\n", "warn")
+                    skipped += 1
+
+        if added:
+            self._log_write(
+                f"Drag & drop — {added} file(s) added"
+                + (f", {skipped} skipped." if skipped else ".") + "\n", "info")
+        self._refresh_queue()
 
     def _start_conversion(self):
         if not self._files or self._running:
