@@ -1108,8 +1108,11 @@ def convert_pdf_to_docx(src: Path, dest: Path) -> bool:
             return s.isupper()
 
         def _clean_ocr_line(line: str) -> str:
-            # Strip leading OCR noise characters: *, |, _, ~, :, /, >, <, =, \
-            line = re.sub(r'^[\s*|_~:/<>=\\]+', '', line)
+            # Strip leading punctuation noise: *, |, _, ~, :, ;, /, >, <, =, \
+            line = re.sub(r'^[\s*|_~:;/<>=\\]+', '', line)
+            # Strip 1-3 char lowercase/punct prefix before a capital letter
+            # e.g. "f Society" -> "Society", "; i Getting" -> "Getting"
+            line = re.sub(r'^[a-z;,.:!?]{1,3}\s+([A-Z])', r'\1', line)
             line = re.sub(r'[\s*|_~]+$', '', line)
             return line.strip()
 
