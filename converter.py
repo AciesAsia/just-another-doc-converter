@@ -1108,20 +1108,30 @@ def convert_pdf_to_docx(src: Path, dest: Path) -> bool:
             return s.isupper()
 
         def _clean_ocr_line(line: str) -> str:
-            """Strip OCR noise: asterisks, pipes and stray punctuation around words."""
-            line = re.sub(r'^\s*[*|_~]+\s*', '', line)
-            line = re.sub(r'\s*[*|_~]+\s*$', '', line)
-            # Strip standalone page-number lines
+            # Strip leading OCR noise characters: *, |, _, ~, :, /, >, <, =, \
+            line = re.sub(r'^[\s*|_~:/<>=\\]+', '', line)
+            line = re.sub(r'[\s*|_~]+$', '', line)
             return line.strip()
 
+        def _is_noise_line(line: str) -> bool:
+            # Skip bare page numbers, page number pairs (e.g. "7 12"), and very short noise
+            if re.match(r'^\d{1,3}(\s+\d{1,3})?$', line):
+                return True
+            # Skip lines that are only punctuation/symbols (no letters or digits)
+            if line and not re.search(r'[A-Za-z0-9]', line):
+                return True
+            # Skip lines shorter than 3 chars that aren't part of a word flow
+            if len(line) < 3:
+                return True
+            return False
+
         def _group_paragraphs(raw_text: str) -> list:
-            """Merge continuation lines; split on blank lines."""
+            # Merge continuation lines into paragraphs; split on blank lines.
             paragraphs = []
             current = ""
             for line in raw_text.splitlines():
                 stripped = _clean_ocr_line(line)
-                # Skip bare page numbers
-                if re.match(r'^\d{1,3}$', stripped):
+                if _is_noise_line(stripped):
                     continue
                 if not stripped:
                     if current:
@@ -1131,7 +1141,8 @@ def convert_pdf_to_docx(src: Path, dest: Path) -> bool:
                     current += (" " if current else "") + stripped
             if current:
                 paragraphs.append(current.strip())
-            return [p for p in paragraphs if len(p) > 1]
+            # Drop paragraphs shorter than 10 chars — almost always noise fragments
+            return [p for p in paragraphs if len(p) >= 10]
 
         from PIL import ImageFilter, ImageEnhance
 
@@ -1148,11 +1159,12 @@ def convert_pdf_to_docx(src: Path, dest: Path) -> bool:
             pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
             img = PILImage.open(io.BytesIO(pix.tobytes("png")))
 
-            # Preprocess image: grayscale → contrast boost → sharpen
-            # Improves OCR accuracy on old/degraded scans
+            # Preprocess: grayscale -> sharpen -> contrast -> binarize
+            # Binarization removes scan noise/bleed-through that confuses Tesseract
             img = img.convert("L")
-            img = ImageEnhance.Contrast(img).enhance(2.0)
             img = img.filter(ImageFilter.SHARPEN)
+            img = ImageEnhance.Contrast(img).enhance(2.0)
+            img = img.point(lambda x: 255 if x > 140 else 0)
 
             raw = pytesseract.image_to_string(img, lang="eng",
                                               config="--oem 3 --psm 6")
