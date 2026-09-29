@@ -150,8 +150,8 @@ class GDriveSyncApp(tk.Tk):
         ).pack(side="right", padx=(0, 12))
 
         # log box
-        log_frame = tk.Frame(self, bg=BG, padx=36, pady=(6, 0))
-        log_frame.pack(fill="both", expand=True, pady=(0, 24))
+        log_frame = tk.Frame(self, bg=BG)
+        log_frame.pack(fill="both", expand=True, padx=36, pady=(6, 24))
 
         self._log = scrolledtext.ScrolledText(
             log_frame,
