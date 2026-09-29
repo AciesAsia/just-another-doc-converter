@@ -1,0 +1,4 @@
+{
+  "use_word_com": false,
+  "_comment_use_word_com": "Set to true to enable Word COM for text-based PDF->Word conversion (highest layout fidelity). Requires Microsoft Word installed. Scanned PDFs always use Tesseract OCR regardless of this setting."
+}

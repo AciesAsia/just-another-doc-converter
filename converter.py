@@ -60,6 +60,21 @@ SUPPORTED = {".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt",
 # Set by the GUI; CLI defaults to Word.
 PDF_OUTPUT_MODE = "word"
 
+# ── Config ────────────────────────────────────────────────
+def _load_config() -> dict:
+    import json
+    cfg_path = BASE_DIR / "config.json"
+    try:
+        with cfg_path.open(encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+_CONFIG = _load_config()
+
+def _cfg(key: str, default=None):
+    return _CONFIG.get(key, default)
+
 
 # ── Logging ───────────────────────────────────────────────
 def log(message: str):
@@ -920,11 +935,15 @@ def convert_pdf_to_docx(src: Path, dest: Path) -> bool:
     import shutil
 
     is_scanned = not _pdf_has_text(src)
-    if is_scanned:
-        log(f"  [INFO] {src.name} — scanned PDF detected, skipping Word COM, using Tesseract OCR")
+    use_word_com = _cfg("use_word_com", False) and not is_scanned
 
-    # ── Tier 1: Word COM (high fidelity, text-based PDFs only) ──────────────
-    if not is_scanned:
+    if is_scanned:
+        log(f"  [INFO] {src.name} — scanned PDF detected, using Tesseract OCR")
+    elif not use_word_com:
+        log(f"  [INFO] {src.name} — Word COM disabled in config.json, using pymupdf/Tesseract")
+
+    # ── Tier 1: Word COM (optional, text-based PDFs only) ────────────────────
+    if use_word_com:
         try:
             import win32com.client, threading
             stop_evt = threading.Event()
