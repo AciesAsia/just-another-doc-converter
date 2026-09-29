@@ -118,7 +118,7 @@ class GDriveSyncApp(tk.Tk):
             self, text="",
             font=FONT_SUB, bg=BG, fg=SUBTEXT, anchor="w"
         )
-        self._lbl_status.pack(fill="x", padx=36, pady=(8, 0))
+        self._lbl_status.pack(fill="x", padx=36, pady=8)
 
         # divider
         tk.Frame(self, bg=BORDER, height=1).pack(fill="x", padx=36, pady=16)
