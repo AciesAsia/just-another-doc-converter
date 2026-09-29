@@ -1128,6 +1128,9 @@ def convert_pdf_to_docx(src: Path, dest: Path) -> bool:
                 continue
 
             raw = _normalize_unicode(raw)
+            # Strip asterisks that Tesseract outputs for unclear chars —
+            # Word's AutoFormat turns *word* into bold inline text
+            raw = re.sub(r'\*+', '', raw)
 
             if page_num > 0:
                 doc.add_page_break()
