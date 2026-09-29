@@ -895,60 +895,77 @@ def _auto_dismiss_word_dialog(stop_event, timeout=60):
         time.sleep(0.2)
 
 
+def _pdf_has_text(src: Path, min_chars: int = 100) -> bool:
+    """Return True if the PDF has selectable text (not image-only/scanned)."""
+    try:
+        import pymupdf as fitz
+        pdf = fitz.open(str(src.resolve()))
+        total = sum(len(pdf[i].get_text("text").strip()) for i in range(min(5, len(pdf))))
+        pdf.close()
+        return total >= min_chars
+    except Exception:
+        return True   # assume text-based if we can't check
+
+
 def convert_pdf_to_docx(src: Path, dest: Path) -> bool:
     """Convert a PDF file to .docx.
 
     Strategy (three tiers):
       1. Word COM — highest fidelity (photos, layout, tables intact).
-         Auto-dismisses Word's PDF conversion info dialog via win32gui.
+         Skipped automatically for scanned/image-only PDFs (Word's built-in
+         OCR produces lower quality output than Tesseract Tier 3).
       2. pymupdf + python-docx — text-only fallback. No Office required.
       3. pytesseract OCR — scanned/image-only PDF fallback.
     """
     import shutil
 
-    # ── Tier 1: Word COM (high fidelity) ─────────────────────────────────────
-    try:
-        import win32com.client, threading
-        stop_evt = threading.Event()
-        dismiss_t = threading.Thread(
-            target=_auto_dismiss_word_dialog, args=(stop_evt,), daemon=True
-        )
-        dismiss_t.start()
+    is_scanned = not _pdf_has_text(src)
+    if is_scanned:
+        log(f"  [INFO] {src.name} — scanned PDF detected, skipping Word COM, using Tesseract OCR")
 
-        # Kill any existing Word process and remove stale output before starting
-        import time
-        subprocess.run(["taskkill", "/F", "/IM", "WINWORD.EXE"], capture_output=True)
-        time.sleep(1)
-        if dest.exists():
+    # ── Tier 1: Word COM (high fidelity, text-based PDFs only) ──────────────
+    if not is_scanned:
+        try:
+            import win32com.client, threading
+            stop_evt = threading.Event()
+            dismiss_t = threading.Thread(
+                target=_auto_dismiss_word_dialog, args=(stop_evt,), daemon=True
+            )
+            dismiss_t.start()
+
+            import time
+            subprocess.run(["taskkill", "/F", "/IM", "WINWORD.EXE"], capture_output=True)
+            time.sleep(1)
+            if dest.exists():
+                try:
+                    dest.unlink()
+                except Exception:
+                    pass
+
+            word = win32com.client.Dispatch("Word.Application")
+            word.Visible = False
             try:
-                dest.unlink()
+                word.WindowState = 2   # wdWindowStateMinimize
             except Exception:
                 pass
-
-        word = win32com.client.Dispatch("Word.Application")
-        word.Visible = False
-        try:
-            word.WindowState = 2   # wdWindowStateMinimize
-        except Exception:
-            pass
-        _word_suppress_dialogs(word)
-        doc = word.Documents.Open(
-            str(src.resolve()),
-            ConfirmConversions=False,
-            ReadOnly=True,
-            AddToRecentFiles=False,
-        )
-        stop_evt.set()   # dialog handled (or not needed) — stop watcher
-        doc.SaveAs2(str(dest.resolve()), FileFormat=16)  # wdFormatDocx = 16
-        doc.Close(SaveChanges=False)
-        subprocess.run(["taskkill", "/F", "/IM", "WINWORD.EXE"], capture_output=True)
-        log(f"  [OK] {dest.name}")
-        return True
-    except ImportError:
-        log("  [WARN] pywin32 not installed — trying pymupdf")
-    except Exception as e:
-        log(f"  [WARN] Word COM failed ({e}) — trying pymupdf")
-        subprocess.run(["taskkill", "/F", "/IM", "WINWORD.EXE"], capture_output=True)
+            _word_suppress_dialogs(word)
+            doc = word.Documents.Open(
+                str(src.resolve()),
+                ConfirmConversions=False,
+                ReadOnly=True,
+                AddToRecentFiles=False,
+            )
+            stop_evt.set()
+            doc.SaveAs2(str(dest.resolve()), FileFormat=16)  # wdFormatDocx = 16
+            doc.Close(SaveChanges=False)
+            subprocess.run(["taskkill", "/F", "/IM", "WINWORD.EXE"], capture_output=True)
+            log(f"  [OK] {dest.name}")
+            return True
+        except ImportError:
+            log("  [WARN] pywin32 not installed — trying pymupdf")
+        except Exception as e:
+            log(f"  [WARN] Word COM failed ({e}) — trying pymupdf")
+            subprocess.run(["taskkill", "/F", "/IM", "WINWORD.EXE"], capture_output=True)
 
     # ── Tier 2: pymupdf + python-docx ────────────────────────────────────────
     try:
