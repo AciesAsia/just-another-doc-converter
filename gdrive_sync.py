@@ -26,7 +26,10 @@ LOCAL_DEST = Path(r"C:\Users\User\Documents\PROJECTS\LRM_DFS\02_PROJECT_FILES\So
 
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 
-SCRIPT_DIR = Path(__file__).parent
+if getattr(sys, "frozen", False):
+    SCRIPT_DIR = Path(sys.executable).parent
+else:
+    SCRIPT_DIR = Path(__file__).parent
 CREDENTIALS_FILE = SCRIPT_DIR / "credentials.json"
 TOKEN_FILE = SCRIPT_DIR / "token.json"
 
