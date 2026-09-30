@@ -1,7 +1,7 @@
 """
 gdrive_sync_gui.py
 ------------------
-Minimal GUI for Google Drive PDF → Word sync.
+GUI for Google Drive PDF → Word sync.
 Reads config from gdrive_sync.py — place both files in the same folder.
 
 Usage:
@@ -11,41 +11,43 @@ Usage:
 import sys
 import threading
 import tkinter as tk
-from tkinter import scrolledtext
+from tkinter import scrolledtext, filedialog
 from pathlib import Path
-import subprocess
 import os
 
 HERE = Path(__file__).parent
 
 # ── Palette ───────────────────────────────────────────────────────────────────
-BG          = "#F7F8FA"
-SURFACE     = "#FFFFFF"
-BORDER      = "#E4E6EA"
-TEXT        = "#111827"
-SUBTEXT     = "#6B7280"
-PRIMARY     = "#2563EB"
-PRIMARY_HV  = "#1D4ED8"
-SUCCESS     = "#059669"
-ERROR       = "#DC2626"
-WARN        = "#D97706"
-LOG_BG      = "#F0F2F5"
-LOG_TEXT    = "#374151"
+BG         = "#F7F8FA"
+SURFACE    = "#FFFFFF"
+BORDER     = "#E4E6EA"
+TEXT       = "#111827"
+SUBTEXT    = "#6B7280"
+PRIMARY    = "#2563EB"
+PRIMARY_HV = "#1D4ED8"
+SUCCESS    = "#059669"
+ERROR      = "#DC2626"
+WARN       = "#D97706"
+LOG_BG     = "#F0F2F5"
+LOG_TEXT   = "#374151"
 
-FONT_UI     = ("Segoe UI", 10)
-FONT_TITLE  = ("Segoe UI", 18, "bold")
-FONT_SUB    = ("Segoe UI", 9)
-FONT_LOG    = ("Consolas", 9)
-FONT_BTN    = ("Segoe UI", 11, "bold")
-FONT_LABEL  = ("Segoe UI", 8, "bold")
+FONT_UI    = ("Segoe UI", 10)
+FONT_TITLE = ("Segoe UI", 18, "bold")
+FONT_SUB   = ("Segoe UI", 9)
+FONT_LOG   = ("Consolas", 9)
+FONT_BTN   = ("Segoe UI", 11, "bold")
+FONT_LABEL = ("Segoe UI", 8, "bold")
+
+DEFAULT_DRIVE_FOLDER = "19RVhksgAetnFtdjQdT7NEgTn3OzI8yfk"
+DEFAULT_LOCAL_DEST   = r"C:\Users\User\Documents\PROJECTS\LRM_DFS\02_PROJECT_FILES\Source_Docs"
 
 
 class GDriveSyncApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Drive Sync")
-        self.geometry("560x580")
-        self.minsize(480, 480)
+        self.geometry("580x660")
+        self.minsize(480, 560)
         self.configure(bg=BG)
         self.resizable(True, True)
         self._running = False
@@ -54,7 +56,6 @@ class GDriveSyncApp(tk.Tk):
     # ── UI construction ───────────────────────────────────────────────────────
 
     def _build_ui(self):
-        # top spacer
         tk.Frame(self, bg=BG, height=32).pack(fill="x")
 
         # title block
@@ -72,34 +73,34 @@ class GDriveSyncApp(tk.Tk):
             font=FONT_SUB, bg=BG, fg=SUBTEXT, anchor="w", wraplength=500, justify="left"
         ).pack(anchor="w", pady=(2, 0))
 
-        # divider
         tk.Frame(self, bg=BORDER, height=1).pack(fill="x", padx=36, pady=20)
 
-        # destination row
-        dest_frame = tk.Frame(self, bg=BG)
-        dest_frame.pack(fill="x", padx=36)
-
-        tk.Label(
-            dest_frame, text="SAVING TO",
-            font=FONT_LABEL, bg=BG, fg=SUBTEXT
-        ).pack(anchor="w", pady=(0, 4))
-
-        dest_path = r"C:\Users\User\Documents\PROJECTS\LRM_DFS\02_PROJECT_FILES\Source_Docs"
-        self._lbl_dest = tk.Label(
-            dest_frame, text=dest_path,
-            font=("Segoe UI", 9), bg=SURFACE, fg=TEXT,
-            anchor="w", padx=10,
-            highlightthickness=1, highlightbackground=BORDER,
-            relief="flat", cursor="arrow"
+        # Drive folder row
+        self._build_field(
+            label="GOOGLE DRIVE FOLDER",
+            hint="Paste the Drive folder URL or ID",
+            default=DEFAULT_DRIVE_FOLDER,
+            attr="_entry_drive",
+            browse=False,
         )
-        self._lbl_dest.pack(fill="x", ipady=7)
 
-        tk.Frame(self, bg=BG, height=16).pack(fill="x")
+        tk.Frame(self, bg=BG, height=12).pack(fill="x")
+
+        # Output folder row
+        self._build_field(
+            label="SAVE CONVERTED FILES TO",
+            hint="Choose a local folder",
+            default=DEFAULT_LOCAL_DEST,
+            attr="_entry_dest",
+            browse=True,
+        )
+
+        tk.Frame(self, bg=BG, height=20).pack(fill="x")
 
         # sync button
         self._btn_sync = tk.Button(
             self,
-            text="⟳  Sync Now",
+            text="\u27f3  Sync Now",
             font=FONT_BTN,
             bg=PRIMARY, fg="#ffffff",
             activebackground=PRIMARY_HV, activeforeground="#ffffff",
@@ -108,7 +109,6 @@ class GDriveSyncApp(tk.Tk):
             command=self._start_sync
         )
         self._btn_sync.pack(padx=36, anchor="w")
-
         self._btn_sync.bind("<Enter>", lambda e: self._btn_sync.config(bg=PRIMARY_HV))
         self._btn_sync.bind("<Leave>", lambda e: self._btn_sync.config(
             bg=PRIMARY if not self._running else PRIMARY_HV))
@@ -120,17 +120,13 @@ class GDriveSyncApp(tk.Tk):
         )
         self._lbl_status.pack(fill="x", padx=36, pady=8)
 
-        # divider
         tk.Frame(self, bg=BORDER, height=1).pack(fill="x", padx=36, pady=16)
 
-        # log header row
+        # log header
         log_hdr = tk.Frame(self, bg=BG)
         log_hdr.pack(fill="x", padx=36)
 
-        tk.Label(
-            log_hdr, text="LOG",
-            font=FONT_LABEL, bg=BG, fg=SUBTEXT
-        ).pack(side="left")
+        tk.Label(log_hdr, text="LOG", font=FONT_LABEL, bg=BG, fg=SUBTEXT).pack(side="left")
 
         self._btn_open = tk.Button(
             log_hdr, text="Open Folder",
@@ -167,85 +163,119 @@ class GDriveSyncApp(tk.Tk):
         self._log.tag_config("warn", foreground=WARN)
         self._log.tag_config("dim",  foreground=SUBTEXT)
 
+    def _build_field(self, label, hint, default, attr, browse):
+        frame = tk.Frame(self, bg=BG)
+        frame.pack(fill="x", padx=36)
+
+        tk.Label(frame, text=label, font=FONT_LABEL, bg=BG, fg=SUBTEXT).pack(anchor="w", pady=(0, 4))
+
+        row = tk.Frame(frame, bg=BG)
+        row.pack(fill="x")
+
+        entry = tk.Entry(
+            row,
+            font=("Segoe UI", 9), bg=SURFACE, fg=TEXT,
+            insertbackground=TEXT,
+            highlightthickness=1, highlightbackground=BORDER,
+            relief="flat"
+        )
+        entry.insert(0, default)
+        entry.pack(side="left", fill="x", expand=True, ipady=7)
+        setattr(self, attr, entry)
+
+        if browse:
+            tk.Button(
+                row, text="Browse",
+                font=("Segoe UI", 9), bg=PRIMARY, fg="#ffffff",
+                activebackground=PRIMARY_HV, activeforeground="#ffffff",
+                relief="flat", bd=0, cursor="hand2",
+                padx=12, pady=0,
+                command=lambda e=entry: self._browse_folder(e)
+            ).pack(side="left", padx=(6, 0), ipady=7)
+
+    def _browse_folder(self, entry):
+        folder = filedialog.askdirectory(title="Select output folder")
+        if folder:
+            entry.delete(0, "end")
+            entry.insert(0, folder)
+
     # ── Sync logic ────────────────────────────────────────────────────────────
 
     def _start_sync(self):
         if self._running:
             return
+
+        drive_val = self._entry_drive.get().strip()
+        dest_val  = self._entry_dest.get().strip()
+
+        if not drive_val:
+            self._lbl_status.config(text="Enter a Google Drive folder URL or ID.", fg=ERROR)
+            return
+        if not dest_val:
+            self._lbl_status.config(text="Choose a local folder to save files.", fg=ERROR)
+            return
+
         self._running = True
-        self._btn_sync.config(text="⟳  Syncing…", state="disabled", bg=PRIMARY_HV)
-        self._lbl_status.config(text="Connecting to Google Drive…", fg=SUBTEXT)
+        self._btn_sync.config(text="\u27f3  Syncing\u2026", state="disabled", bg=PRIMARY_HV)
+        self._lbl_status.config(text="Connecting to Google Drive\u2026", fg=SUBTEXT)
         self._clear_log()
-        threading.Thread(target=self._run_sync, daemon=True).start()
+        threading.Thread(
+            target=self._run_sync,
+            args=(drive_val, dest_val),
+            daemon=True
+        ).start()
 
-    def _run_sync(self):
+    def _run_sync(self, drive_folder, local_dest):
         try:
-            # Import gdrive_sync inline so we capture its print output
             sys.path.insert(0, str(HERE))
-
-            # Redirect stdout so we can capture log lines
-            import io
-            from contextlib import redirect_stdout
-
-            # Patch gdrive_sync to use our logger
             import importlib
             import gdrive_sync as gs
 
-            # Monkey-patch print inside gdrive_sync
-            original_print = __builtins__["print"] if isinstance(__builtins__, dict) else print
-
+            original_print = print
             counts = {"converted": 0, "failed": 0}
 
             def gui_print(*args, **kwargs):
                 msg = " ".join(str(a) for a in args)
                 end = kwargs.get("end", "\n")
-                flush = kwargs.get("flush", False)
                 tag = "dim"
                 if "OK" in msg:
                     tag = "ok"
-                    if ".docx" in msg.lower() or "saved" in msg.lower() or "deleted" in msg.lower():
-                        counts["converted"] += 1
+                    counts["converted"] += 1
                 elif "FAILED" in msg or "ERROR" in msg:
                     tag = "err"
-                    if "FAILED" in msg and "Converting:" in self._last_line:
+                    if "FAILED" in msg:
                         counts["failed"] += 1
                 elif "WARN" in msg:
                     tag = "warn"
-                self._last_line = msg
                 self.after(0, self._append_log, msg + ("" if end == "" else ""), tag)
-
-            self._last_line = ""
 
             import builtins
             builtins.print = gui_print
 
             try:
                 importlib.reload(gs)
-                gs.run()
+                gs.run(drive_folder, local_dest)
             finally:
                 builtins.print = original_print
 
-            # Count from log
-            self.after(0, self._sync_done, counts)
+            self.after(0, self._sync_done, counts, local_dest)
 
         except Exception as e:
             self.after(0, self._append_log, f"[ERROR] {e}", "err")
-            self.after(0, self._sync_done, {"converted": 0, "failed": 1})
+            self.after(0, self._sync_done, {"converted": 0, "failed": 1}, local_dest)
 
-    def _sync_done(self, counts):
+    def _sync_done(self, counts, local_dest):
         self._running = False
-        self._btn_sync.config(text="⟳  Sync Now", state="normal", bg=PRIMARY)
+        self._btn_sync.config(text="\u27f3  Sync Now", state="normal", bg=PRIMARY)
         converted = counts.get("converted", 0)
-        failed = counts.get("failed", 0)
+        failed    = counts.get("failed", 0)
         if failed == 0 and converted > 0:
-            self._lbl_status.config(
-                text=f"Done — {converted} file(s) converted.", fg=SUCCESS)
+            self._lbl_status.config(text=f"Done \u2014 {converted} file(s) converted.", fg=SUCCESS)
         elif failed > 0:
-            self._lbl_status.config(
-                text=f"Done — {converted} converted, {failed} failed.", fg=WARN)
+            self._lbl_status.config(text=f"Done \u2014 {converted} converted, {failed} failed.", fg=WARN)
         else:
-            self._lbl_status.config(
-                text="Done — no files found in Drive folder.", fg=SUBTEXT)
+            self._lbl_status.config(text="Done \u2014 no PDF files found in Drive folder.", fg=SUBTEXT)
+        self._current_dest = local_dest
 
     # ── Log helpers ───────────────────────────────────────────────────────────
 
@@ -264,7 +294,7 @@ class GDriveSyncApp(tk.Tk):
         self._log.config(state="disabled")
 
     def _open_folder(self):
-        folder = Path(r"C:\Users\User\Documents\PROJECTS\LRM_DFS\02_PROJECT_FILES\Source_Docs")
+        folder = Path(getattr(self, "_current_dest", self._entry_dest.get().strip()))
         if folder.exists():
             os.startfile(str(folder))
         else:
